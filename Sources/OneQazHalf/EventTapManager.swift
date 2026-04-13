@@ -10,6 +10,16 @@ final class EventTapManager {
     // MARK: - 功能開關
     var isRunning: Bool { tap != nil }
 
+    /// 選字狀態下的清除方式
+    enum ClearMethod: String {
+        case enter       // 送 Enter 提交選字（快速，無延遲）
+        case inputSwitch // 切換輸入法取消組字（相容性佳）
+    }
+    var clearMethod: ClearMethod {
+        get { ClearMethod(rawValue: UserDefaults.standard.string(forKey: "clearMethod") ?? "") ?? .enter }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "clearMethod") }
+    }
+
     // MARK: - 注音組字狀態追蹤
     private var hasPendingBopomofo = false
     private static let commitKeys: Set<CGKeyCode> = [36, 53, 49] // Return, Escape, Space
@@ -159,14 +169,48 @@ final class EventTapManager {
     // MARK: - 注入字元
 
     private func inject(_ char: Character) -> Unmanaged<CGEvent>? {
-        if hasPendingBopomofo {
-            clearBopomofoInput()
-            // 有注音 buffer：送 Enter 讓 IME 提交選字
-            // IME 有組字時 Enter 會被 IME 攔截，不會觸發 Line 等 app 的送出動作
-            sendKey(36, source: CGEventSource(stateID: .hidSystemState)) // Enter
+        guard hasPendingBopomofo else {
+            postChar(char)
+            return nil
         }
-        postChar(char)
+        clearBopomofoInput()
+
+        switch clearMethod {
+        case .enter:
+            // 送 Enter 讓 IME 提交選字（IME 有組字時會攔截 Enter，不影響其他 app）
+            sendKey(36, source: CGEventSource(stateID: .hidSystemState))
+            postChar(char)
+
+        case .inputSwitch:
+            // 切換到 ABC 讓 IME 自動取消組字，注入後切回注音
+            let bopomofoID = InputSourceHelper.currentInputSourceID()
+            if let ascii = findASCIILayout() {
+                TISSelectInputSource(ascii)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    self.postChar(char)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        if let bopomofo = self.findInputSourceByID(bopomofoID) {
+                            TISSelectInputSource(bopomofo)
+                        }
+                    }
+                }
+                return nil
+            }
+            postChar(char)
+        }
         return nil
+    }
+
+    private func findASCIILayout() -> TISInputSource? {
+        let props = [kTISPropertyInputSourceIsASCIICapable: true] as CFDictionary
+        let list = TISCreateInputSourceList(props, false)?.takeRetainedValue() as? [TISInputSource]
+        return list?.first
+    }
+
+    private func findInputSourceByID(_ id: String) -> TISInputSource? {
+        let props = [kTISPropertyInputSourceID: id as CFString] as CFDictionary
+        let list = TISCreateInputSourceList(props, false)?.takeRetainedValue() as? [TISInputSource]
+        return list?.first
     }
 
     private func postChar(_ char: Character) {

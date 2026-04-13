@@ -80,6 +80,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ))
 
         menu.addItem(.separator())
+
+        let clearLabel = NSMenuItem(title: "選字狀態清除方式", action: nil, keyEquivalent: "")
+        clearLabel.isEnabled = false
+        menu.addItem(clearLabel)
+
+        menu.addItem(makeRadio(
+            title: "Enter 提交選字（快速）",
+            selected: tapManager.clearMethod == .enter,
+            action: #selector(setClearMethodEnter)
+        ))
+        menu.addItem(makeRadio(
+            title: "切換輸入法取消組字（相容性佳）",
+            selected: tapManager.clearMethod == .inputSwitch,
+            action: #selector(setClearMethodInputSwitch)
+        ))
+
+        menu.addItem(.separator())
         menu.addItem(makeToggle(
             title: "開機自動啟動",
             state: LoginItemManager.isEnabled,
@@ -140,6 +157,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return item
     }
 
+    private func makeRadio(title: String, selected: Bool, action: Selector) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.state = selected ? .on : .off
+        item.indentationLevel = 1
+        return item
+    }
+
     // MARK: - 動作
 
     @objc private func toggleTap() {
@@ -164,6 +188,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         rebuildMenu()
     }
+
+    @objc private func setClearMethodEnter()       { tapManager.clearMethod = .enter;       rebuildMenu() }
+    @objc private func setClearMethodInputSwitch() { tapManager.clearMethod = .inputSwitch; rebuildMenu() }
 
     @objc private func toggleShiftLetter()  { tapManager.shiftLetterEnabled.toggle(); rebuildMenu() }
     @objc private func toggleShiftNumber()  { tapManager.shiftNumberEnabled.toggle(); rebuildMenu() }
