@@ -8,6 +8,13 @@ final class EventTapManager {
     private var runLoopSource: CFRunLoopSource?
 
     // MARK: - 功能開關
+    var isRunning: Bool { tap != nil }
+
+    // MARK: - 注音組字狀態追蹤
+    private var hasPendingBopomofo = false
+    private static let commitKeys: Set<CGKeyCode> = [36, 53, 49] // Return, Escape, Space
+    private func clearBopomofoInput() { hasPendingBopomofo = false }
+
     var shiftLetterEnabled  = true  // Shift + 字母 → 小寫半形英文
     var shiftNumberEnabled  = true  // Shift + 數字列 → 半形符號
     var shiftPunctEnabled   = true  // Shift + 標點 → 半形標點
@@ -52,7 +59,12 @@ final class EventTapManager {
     func start() -> Bool {
         stop()
 
-        guard AXIsProcessTrustedWithOptions(nil) else { return false }
+        let trusted = AXIsProcessTrustedWithOptions(nil)
+        print("[1qaz Half] AXIsTrusted = \(trusted)")
+        guard trusted else {
+            print("[1qaz Half] ✗ 沒有 Accessibility 權限")
+            return false
+        }
 
         let mask: CGEventMask =
             (1 << CGEventType.keyDown.rawValue) |
@@ -65,13 +77,16 @@ final class EventTapManager {
             eventsOfInterest: mask,
             callback: globalTapCallback,
             userInfo: Unmanaged.passUnretained(self).toOpaque()
-        ) else { return false }
+        ) else {
+            print("[1qaz Half] ✗ CGEvent.tapCreate 失敗（權限已給但仍失敗？）")
+            return false
+        }
 
         tap = port
         runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, port, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
         CGEvent.tapEnable(tap: port, enable: true)
-        print("[1qaz Half] Event tap 已啟動")
+        print("[1qaz Half] ✓ Event tap 已啟動")
         return true
     }
 
@@ -123,6 +138,12 @@ final class EventTapManager {
             return inject(ch)
         }
 
+        // 追蹤注音組字狀態：只有無修飾鍵的字母鍵才算真正的注音輸入
+        if Self.commitKeys.contains(kc) {
+            clearBopomofoInput()
+        } else if !shift && !option, Self.letterKeys[kc] != nil {
+            hasPendingBopomofo = true
+        }
         return Unmanaged.passRetained(event)
     }
 
@@ -138,12 +159,37 @@ final class EventTapManager {
     // MARK: - 注入字元
 
     private func inject(_ char: Character) -> Unmanaged<CGEvent>? {
+        if hasPendingBopomofo {
+            clearBopomofoInput()
+            // 有注音 buffer：切換到 ABC 讓 IME 自動取消組字，注入後切回
+            // 用 ID 字串重新查找注音輸入法，避免引用失效
+            let bopomofoID = InputSourceHelper.currentInputSourceID()
+            if let ascii = findASCIILayout() {
+                TISSelectInputSource(ascii)
+                // 等 ABC 切換生效後注入字元，再切回注音
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    self.postChar(char)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        if let bopomofo = self.findInputSourceByID(bopomofoID) {
+                            TISSelectInputSource(bopomofo)
+                        }
+                    }
+                }
+                return nil
+            }
+        }
+        postChar(char)
+        return nil
+    }
+
+    private func findInputSourceByID(_ id: String) -> TISInputSource? {
+        let props = [kTISPropertyInputSourceID: id as CFString] as CFDictionary
+        let list = TISCreateInputSourceList(props, false)?.takeRetainedValue() as? [TISInputSource]
+        return list?.first
+    }
+
+    private func postChar(_ char: Character) {
         let src = CGEventSource(stateID: .hidSystemState)
-
-        // 送兩次 Escape 清除注音 buffer（選字狀態需兩次）
-        sendKey(53, source: src)
-        sendKey(53, source: src)
-
         var utf16 = Array(String(char).utf16)
         if let down = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: true) {
             down.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
@@ -155,7 +201,13 @@ final class EventTapManager {
             up.flags = []
             up.post(tap: .cgAnnotatedSessionEventTap)
         }
-        return nil
+    }
+
+    private func findASCIILayout() -> TISInputSource? {
+        let props = [kTISPropertyInputSourceIsASCIICapable: true,
+                     kTISPropertyInputSourceType: kTISTypeKeyboardLayout] as CFDictionary
+        let list = TISCreateInputSourceList(props, false)?.takeRetainedValue() as? [TISInputSource]
+        return list?.first
     }
 
     private func sendKey(_ keyCode: CGKeyCode, source: CGEventSource?) {
@@ -166,6 +218,7 @@ final class EventTapManager {
         down?.post(tap: .cgAnnotatedSessionEventTap)
         up?.post(tap: .cgAnnotatedSessionEventTap)
     }
+
 }
 
 // MARK: - 全域 C Callback
