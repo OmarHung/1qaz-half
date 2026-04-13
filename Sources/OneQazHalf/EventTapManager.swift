@@ -161,31 +161,12 @@ final class EventTapManager {
     private func inject(_ char: Character) -> Unmanaged<CGEvent>? {
         if hasPendingBopomofo {
             clearBopomofoInput()
-            // 有注音 buffer：切換到 ABC 讓 IME 自動取消組字，注入後切回
-            // 用 ID 字串重新查找注音輸入法，避免引用失效
-            let bopomofoID = InputSourceHelper.currentInputSourceID()
-            if let ascii = findASCIILayout() {
-                TISSelectInputSource(ascii)
-                // 等 ABC 切換生效後注入字元，再切回注音
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                    self.postChar(char)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                        if let bopomofo = self.findInputSourceByID(bopomofoID) {
-                            TISSelectInputSource(bopomofo)
-                        }
-                    }
-                }
-                return nil
-            }
+            // 有注音 buffer：送 Enter 讓 IME 提交選字
+            // IME 有組字時 Enter 會被 IME 攔截，不會觸發 Line 等 app 的送出動作
+            sendKey(36, source: CGEventSource(stateID: .hidSystemState)) // Enter
         }
         postChar(char)
         return nil
-    }
-
-    private func findInputSourceByID(_ id: String) -> TISInputSource? {
-        let props = [kTISPropertyInputSourceID: id as CFString] as CFDictionary
-        let list = TISCreateInputSourceList(props, false)?.takeRetainedValue() as? [TISInputSource]
-        return list?.first
     }
 
     private func postChar(_ char: Character) {
@@ -203,12 +184,6 @@ final class EventTapManager {
         }
     }
 
-    private func findASCIILayout() -> TISInputSource? {
-        let props = [kTISPropertyInputSourceIsASCIICapable: true,
-                     kTISPropertyInputSourceType: kTISTypeKeyboardLayout] as CFDictionary
-        let list = TISCreateInputSourceList(props, false)?.takeRetainedValue() as? [TISInputSource]
-        return list?.first
-    }
 
     private func sendKey(_ keyCode: CGKeyCode, source: CGEventSource?) {
         let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true)
