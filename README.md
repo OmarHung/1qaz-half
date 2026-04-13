@@ -80,9 +80,19 @@ App 不會收集任何個人資料，所有處理均在本機完成。
 
 ---
 
+## 為什麼每次安裝都要重新到安全性設定授權？
+
+macOS 的 Accessibility 授權機制是以 **code signature（程式碼簽名）** 來識別 app 身份。
+
+1qaz Half 目前使用 **ad-hoc 簽名**（本機自簽，不需 Apple Developer 帳號），其 identity 是根據 binary 內容計算出的 hash。只要重新編譯或更新版本，binary 內容改變，hash 就跟著變，macOS 便視為全新的 app，之前的授權記錄自動失效。
+
+如果使用 Apple Developer Program（$99 USD/年）的 Developer ID 憑證簽名，則 identity 固定，升級後不需要重新授權。目前 1qaz Half 為個人開發的免費工具，暫不申請。
+
+---
+
 ## 升級方式
 
-每次重新安裝需重新授權 Accessibility 權限（macOS 以路徑識別 app，重新安裝後視為新 app）：
+每次安裝新版本需重新授權 Accessibility 權限：
 
 ```bash
 rm -rf /Applications/1qaz\ Half.app
