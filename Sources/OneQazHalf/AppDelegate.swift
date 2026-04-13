@@ -37,7 +37,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func rebuildMenu() {
         let menu = NSMenu()
 
-        let header = NSMenuItem(title: "1qaz Half", action: nil, keyEquivalent: "")
+        let header = NSMenuItem(title: "1qaz Half  v\(UpdateChecker.currentVersion)", action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
 
@@ -86,6 +86,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             action: #selector(toggleLoginItem)
         ))
         menu.addItem(.separator())
+        menu.addItem(NSMenuItem(
+            title: "檢查更新...",
+            action: #selector(checkForUpdates),
+            keyEquivalent: ""
+        ))
         menu.addItem(NSMenuItem(
             title: "診斷資訊...",
             action: #selector(showDiagnostics),
@@ -164,6 +169,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleShiftNumber()  { tapManager.shiftNumberEnabled.toggle(); rebuildMenu() }
     @objc private func toggleShiftPunct()   { tapManager.shiftPunctEnabled.toggle();  rebuildMenu() }
     @objc private func toggleNumpad()       { tapManager.numpadEnabled.toggle();       rebuildMenu() }
+
+    @objc private func checkForUpdates() {
+        // 不顯示 blocking alert，直接背景查詢，完成後才顯示結果
+        UpdateChecker.checkForUpdates { [self] hasUpdate, latestVersion, error in
+            if let error {
+                showAlert(title: "檢查失敗", message: "無法連線至 GitHub。\n\n\(error.localizedDescription)")
+                return
+            }
+            if hasUpdate, let latest = latestVersion {
+                NSApp.setActivationPolicy(.regular)
+                NSApp.activate(ignoringOtherApps: true)
+                let alert = NSAlert()
+                alert.messageText = "發現新版本 v\(latest)"
+                alert.informativeText = "目前版本：v\(UpdateChecker.currentVersion)\n最新版本：v\(latest)"
+                alert.addButton(withTitle: "前往下載")
+                alert.addButton(withTitle: "稍後再說")
+                if alert.runModal() == .alertFirstButtonReturn {
+                    UpdateChecker.openReleasesPage()
+                }
+                NSApp.setActivationPolicy(.accessory)
+            } else {
+                showAlert(title: "已是最新版本", message: "目前版本 v\(UpdateChecker.currentVersion) 已是最新版。")
+            }
+        }
+    }
 
     @objc private func showDiagnostics() {
         let trusted   = AXIsProcessTrustedWithOptions(nil)
