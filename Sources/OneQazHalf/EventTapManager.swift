@@ -14,6 +14,7 @@ final class EventTapManager {
     enum ClearMethod: String {
         case enter       // 送 Enter 提交選字（快速，無延遲）
         case inputSwitch // 切換輸入法取消組字（相容性佳）
+        case off         // 不處理選字狀態，直接注入
     }
     var clearMethod: ClearMethod {
         get { ClearMethod(rawValue: UserDefaults.standard.string(forKey: "clearMethod") ?? "") ?? .enter }
@@ -169,13 +170,16 @@ final class EventTapManager {
     // MARK: - 注入字元
 
     private func inject(_ char: Character) -> Unmanaged<CGEvent>? {
-        guard hasPendingBopomofo else {
+        guard hasPendingBopomofo && clearMethod != .off else {
             postChar(char)
             return nil
         }
         clearBopomofoInput()
 
         switch clearMethod {
+        case .off:
+            break // unreachable, handled above
+
         case .enter:
             // 送 Enter 讓 IME 提交選字（IME 有組字時會攔截 Enter，不影響其他 app）
             sendKey(36, source: CGEventSource(stateID: .hidSystemState))

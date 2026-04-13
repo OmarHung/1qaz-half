@@ -95,6 +95,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             selected: tapManager.clearMethod == .inputSwitch,
             action: #selector(setClearMethodInputSwitch)
         ))
+        menu.addItem(makeRadio(
+            title: "關閉（不處理選字狀態）",
+            selected: tapManager.clearMethod == .off,
+            action: #selector(setClearMethodOff)
+        ))
 
         menu.addItem(.separator())
         menu.addItem(makeToggle(
@@ -191,6 +196,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func setClearMethodEnter()       { tapManager.clearMethod = .enter;       rebuildMenu() }
     @objc private func setClearMethodInputSwitch() { tapManager.clearMethod = .inputSwitch; rebuildMenu() }
+    @objc private func setClearMethodOff()         { tapManager.clearMethod = .off;         rebuildMenu() }
 
     @objc private func toggleShiftLetter()  { tapManager.shiftLetterEnabled.toggle(); rebuildMenu() }
     @objc private func toggleShiftNumber()  { tapManager.shiftNumberEnabled.toggle(); rebuildMenu() }
