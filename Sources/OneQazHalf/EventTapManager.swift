@@ -12,18 +12,38 @@ final class EventTapManager {
 
     /// 選字狀態下的清除方式
     enum ClearMethod: String {
-        case enter       // 送 Enter 提交選字（快速，無延遲）
+        case enter       // 送 Enter 提交選字
+        case endKey      // 送 End 鍵退出選字
         case inputSwitch // 切換輸入法取消組字（相容性佳）
         case off         // 不處理選字狀態，直接注入
     }
-    var clearMethod: ClearMethod {
-        get { ClearMethod(rawValue: UserDefaults.standard.string(forKey: "clearMethod") ?? "") ?? .enter }
+    // 全域預設
+    var defaultClearMethod: ClearMethod {
+        get { ClearMethod(rawValue: UserDefaults.standard.string(forKey: "clearMethod") ?? "") ?? .endKey }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: "clearMethod") }
     }
 
-    // MARK: - 注音組字狀態追蹤
+    // 個別 App 覆蓋（bundleID → ClearMethod.rawValue）
+    private var appOverrides: [String: String] {
+        get { UserDefaults.standard.dictionary(forKey: "appClearMethods") as? [String: String] ?? [:] }
+        set { UserDefaults.standard.set(newValue, forKey: "appClearMethods") }
+    }
+    func clearMethodOverride(for bundleID: String) -> ClearMethod? {
+        guard let raw = appOverrides[bundleID] else { return nil }
+        return ClearMethod(rawValue: raw)
+    }
+    func setClearMethodOverride(_ method: ClearMethod?, for bundleID: String) {
+        var dict = appOverrides
+        if let m = method { dict[bundleID] = m.rawValue } else { dict.removeValue(forKey: bundleID) }
+        appOverrides = dict
+    }
+    func effectiveClearMethod(for bundleID: String) -> ClearMethod {
+        clearMethodOverride(for: bundleID) ?? defaultClearMethod
+    }
+
+    // MARK: - 注音組字狀態追蹤（啟發式）
     private var hasPendingBopomofo = false
-    private static let commitKeys: Set<CGKeyCode> = [36, 53, 49] // Return, Escape, Space
+    private static let commitKeys: Set<CGKeyCode> = [36, 53, 49, 119] // Return, Escape, Space, End
     private func clearBopomofoInput() { hasPendingBopomofo = false }
 
     var shiftLetterEnabled  = true  // Shift + 字母 → 半形英文
@@ -172,22 +192,29 @@ final class EventTapManager {
         if let port = tap { CGEvent.tapEnable(tap: port, enable: true) }
     }
 
+
     // MARK: - 注入字元
 
     private func inject(_ char: Character) -> Unmanaged<CGEvent>? {
-        guard hasPendingBopomofo && clearMethod != .off else {
+        let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
+        let method = effectiveClearMethod(for: bundleID)
+
+        guard hasPendingBopomofo && method != .off else {
             postChar(char)
             return nil
         }
         clearBopomofoInput()
 
-        switch clearMethod {
+        switch method {
         case .off:
             break // unreachable, handled above
 
         case .enter:
-            // 送 Enter 讓 IME 提交選字（IME 有組字時會攔截 Enter，不影響其他 app）
             sendKey(36, source: CGEventSource(stateID: .hidSystemState))
+            postChar(char)
+
+        case .endKey:
+            sendKey(119, source: CGEventSource(stateID: .hidSystemState))
             postChar(char)
 
         case .inputSwitch:

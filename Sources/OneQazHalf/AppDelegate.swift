@@ -1,11 +1,13 @@
 import AppKit
 import Carbon
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var statusItem: NSStatusItem!
     private let tapManager = EventTapManager()
     private var isEnabled = true
+    private var currentAppBundleID = ""
+    private var currentAppName = "（尚未偵測到）"
 
     // MARK: - 啟動
 
@@ -13,13 +15,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupStatusItem()
         requestPermissionAndStart()
 
-        // 監聽輸入法切換（可用來更新 icon 狀態）
         DistributedNotificationCenter.default().addObserver(
             self,
             selector: #selector(inputSourceChanged),
             name: .init(kTISNotifySelectedKeyboardInputSourceChanged as String),
             object: nil
         )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(activeAppChanged(_:)),
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
+        print("[AppTrack] Bundle.main.bundleIdentifier = \(Bundle.main.bundleIdentifier ?? "nil")")
+        updateCurrentApp(NSWorkspace.shared.frontmostApplication)
+    }
+
+    @objc private func activeAppChanged(_ notification: Notification) {
+        let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+        updateCurrentApp(app)
+    }
+
+    private func updateCurrentApp(_ app: NSRunningApplication?) {
+        guard let app = app else { return }
+        let bid = app.bundleIdentifier ?? ""
+        let selfID = Bundle.main.bundleIdentifier ?? ""
+        print("[AppTrack] frontmost = \(app.localizedName ?? "?")  (\(bid))  selfID=\(selfID)")
+        // 跳過自己（selfID 可能是空字串，用 processIdentifier 比對更可靠）
+        guard app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
+        guard !bid.isEmpty else { return }
+        currentAppBundleID = bid
+        currentAppName = app.localizedName ?? bid
+        print("[AppTrack] ✓ currentApp 更新為 \(currentAppName)")
     }
 
     // MARK: - 選單列圖示
@@ -34,8 +61,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildMenu()
     }
 
+    func menuWillOpen(_ menu: NSMenu) {
+        rebuildMenu()
+    }
+
     private func rebuildMenu() {
         let menu = NSMenu()
+        menu.delegate = self
         menu.autoenablesItems = false
 
         let header = NSMenuItem(title: "1qaz Half  v\(UpdateChecker.currentVersion)", action: nil, keyEquivalent: "")
@@ -100,25 +132,42 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        let clearLabel = NSMenuItem(title: "選字狀態清除方式", action: nil, keyEquivalent: "")
+        // ── 全域預設清除方式 ──────────────────────────────────────────────
+        let clearLabel = NSMenuItem(title: "選字清除方式（全域預設）", action: nil, keyEquivalent: "")
         clearLabel.isEnabled = false
         menu.addItem(clearLabel)
+        for (title, method) in clearMethodOptions {
+            menu.addItem(makeRadio(
+                title: title,
+                selected: tapManager.defaultClearMethod == method,
+                action: #selector(setDefaultClearMethod(_:)),
+                representedObject: method.rawValue
+            ))
+        }
 
-        menu.addItem(makeRadio(
-            title: "Enter 提交選字（快速）",
-            selected: tapManager.clearMethod == .enter,
-            action: #selector(setClearMethodEnter)
-        ))
-        menu.addItem(makeRadio(
-            title: "切換輸入法取消組字（相容性佳）",
-            selected: tapManager.clearMethod == .inputSwitch,
-            action: #selector(setClearMethodInputSwitch)
-        ))
-        menu.addItem(makeRadio(
-            title: "關閉（不處理選字狀態）",
-            selected: tapManager.clearMethod == .off,
-            action: #selector(setClearMethodOff)
-        ))
+        // ── 目前 App 個別設定 ────────────────────────────────────────────
+        if !currentAppBundleID.isEmpty {
+            let appLabel = NSMenuItem(title: "\(currentAppName) 個別設定", action: nil, keyEquivalent: "")
+            appLabel.isEnabled = false
+            menu.addItem(appLabel)
+
+            let override = tapManager.clearMethodOverride(for: currentAppBundleID)
+            let defaultName = clearMethodOptions.first { $0.1 == tapManager.defaultClearMethod }?.0 ?? ""
+            menu.addItem(makeRadio(
+                title: "使用全域預設（\(defaultName)）",
+                selected: override == nil,
+                action: #selector(setAppClearMethod(_:)),
+                representedObject: ""   // 空字串代表「使用全域預設」
+            ))
+            for (title, method) in clearMethodOptions {
+                menu.addItem(makeRadio(
+                    title: title,
+                    selected: override == method,
+                    action: #selector(setAppClearMethod(_:)),
+                    representedObject: method.rawValue
+                ))
+            }
+        }
 
         menu.addItem(.separator())
         menu.addItem(makeToggle(
@@ -182,11 +231,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return item
     }
 
-    private func makeRadio(title: String, selected: Bool, action: Selector) -> NSMenuItem {
+    private func makeRadio(title: String, selected: Bool, action: Selector,
+                           representedObject: Any? = nil) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
         item.target = self
         item.state = selected ? .on : .off
         item.indentationLevel = 1
+        item.representedObject = representedObject
         return item
     }
 
@@ -215,9 +266,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildMenu()
     }
 
-    @objc private func setClearMethodEnter()       { tapManager.clearMethod = .enter;       rebuildMenu() }
-    @objc private func setClearMethodInputSwitch() { tapManager.clearMethod = .inputSwitch; rebuildMenu() }
-    @objc private func setClearMethodOff()         { tapManager.clearMethod = .off;         rebuildMenu() }
+    private var clearMethodOptions: [(String, EventTapManager.ClearMethod)] {
+        [("End 鍵退出選字",    .endKey),
+         ("Enter 提交選字",   .enter),
+         ("切換輸入法取消組字", .inputSwitch),
+         ("關閉（不處理）",    .off)]
+    }
+
+    @objc private func setDefaultClearMethod(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let method = EventTapManager.ClearMethod(rawValue: raw) else { return }
+        tapManager.defaultClearMethod = method
+        rebuildMenu()
+    }
+
+    @objc private func setAppClearMethod(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String else { return }
+        if raw.isEmpty {
+            tapManager.setClearMethodOverride(nil, for: currentAppBundleID)
+        } else if let method = EventTapManager.ClearMethod(rawValue: raw) {
+            tapManager.setClearMethodOverride(method, for: currentAppBundleID)
+        }
+        rebuildMenu()
+    }
 
     @objc private func toggleShiftLetter()  { tapManager.shiftLetterEnabled.toggle(); rebuildMenu() }
     @objc private func setShiftLetterLower() { tapManager.shiftLetterUppercase = false; rebuildMenu() }
