@@ -26,7 +26,11 @@ final class EventTapManager {
     private static let commitKeys: Set<CGKeyCode> = [36, 53, 49] // Return, Escape, Space
     private func clearBopomofoInput() { hasPendingBopomofo = false }
 
-    var shiftLetterEnabled  = true  // Shift + 字母 → 小寫半形英文
+    var shiftLetterEnabled  = true  // Shift + 字母 → 半形英文
+    var shiftLetterUppercase: Bool {
+        get { UserDefaults.standard.bool(forKey: "shiftLetterUppercase") }
+        set { UserDefaults.standard.set(newValue, forKey: "shiftLetterUppercase") }
+    }
     var shiftNumberEnabled  = true  // Shift + 數字列 → 半形符號
     var shiftPunctEnabled   = true  // Shift + 標點 → 半形標點
     var numpadEnabled       = true  // 九宮格 → 半形數字
@@ -125,10 +129,11 @@ final class EventTapManager {
 
         guard !command && !control && !option else { return Unmanaged.passRetained(event) }
 
-        // ── Shift + 字母 → 小寫半形英文 ──────────────────────────────────
+        // ── Shift + 字母 → 半形英文（大寫或小寫依設定） ─────────────────────
         if shiftLetterEnabled && shift, let ch = Self.letterKeys[kc] {
-            log(trigger: "Shift+\(ch)", output: ch, feature: "半形英文")
-            return inject(ch)
+            let out: Character = shiftLetterUppercase ? Character(String(ch).uppercased()) : ch
+            log(trigger: "Shift+\(ch)", output: out, feature: "半形英文")
+            return inject(out)
         }
 
         // ── Shift + 數字列 → 半形符號 ─────────────────────────────────────

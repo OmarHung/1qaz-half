@@ -3,7 +3,7 @@ import Foundation
 
 enum UpdateChecker {
 
-    static let currentVersion = "1.4.0"
+    static let currentVersion = "1.5.0"
 
     private static let apiURL = URL(string: "https://api.github.com/repos/OmarHung/1qaz-half/releases/latest")!
     private static let releasesURL = URL(string: "https://github.com/OmarHung/1qaz-half/releases/latest")!

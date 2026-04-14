@@ -36,6 +36,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func rebuildMenu() {
         let menu = NSMenu()
+        menu.autoenablesItems = false
 
         let header = NSMenuItem(title: "1qaz Half  v\(UpdateChecker.currentVersion)", action: nil, keyEquivalent: "")
         header.isEnabled = false
@@ -59,10 +60,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
 
         menu.addItem(makeToggle(
-            title: "Shift + 字母 → 小寫半形英文",
+            title: "Shift + 字母 → 半形英文",
             state: tapManager.shiftLetterEnabled,
             action: #selector(toggleShiftLetter)
         ))
+        let caseEnabled = tapManager.shiftLetterEnabled
+        let caseLabel = NSMenuItem(title: "    字母大小寫", action: nil, keyEquivalent: "")
+        caseLabel.isEnabled = false
+        menu.addItem(caseLabel)
+        let lowerItem = makeRadio(
+            title: "小寫（abc）",
+            selected: !tapManager.shiftLetterUppercase,
+            action: #selector(setShiftLetterLower)
+        )
+        lowerItem.isEnabled = caseEnabled
+        menu.addItem(lowerItem)
+        let upperItem = makeRadio(
+            title: "大寫（ABC）",
+            selected: tapManager.shiftLetterUppercase,
+            action: #selector(setShiftLetterUpper)
+        )
+        upperItem.isEnabled = caseEnabled
+        menu.addItem(upperItem)
         menu.addItem(makeToggle(
             title: "Shift + 數字 → 半形符號（!@#…）",
             state: tapManager.shiftNumberEnabled,
@@ -158,12 +177,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func makeToggle(title: String, state: Bool, action: Selector) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
         item.state = state ? .on : .off
         return item
     }
 
     private func makeRadio(title: String, selected: Bool, action: Selector) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
         item.state = selected ? .on : .off
         item.indentationLevel = 1
         return item
@@ -199,6 +220,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func setClearMethodOff()         { tapManager.clearMethod = .off;         rebuildMenu() }
 
     @objc private func toggleShiftLetter()  { tapManager.shiftLetterEnabled.toggle(); rebuildMenu() }
+    @objc private func setShiftLetterLower() { tapManager.shiftLetterUppercase = false; rebuildMenu() }
+    @objc private func setShiftLetterUpper() { tapManager.shiftLetterUppercase = true;  rebuildMenu() }
     @objc private func toggleShiftNumber()  { tapManager.shiftNumberEnabled.toggle(); rebuildMenu() }
     @objc private func toggleShiftPunct()   { tapManager.shiftPunctEnabled.toggle();  rebuildMenu() }
     @objc private func toggleNumpad()       { tapManager.numpadEnabled.toggle();       rebuildMenu() }
